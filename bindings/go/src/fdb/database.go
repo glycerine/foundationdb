@@ -29,6 +29,7 @@ import "C"
 import (
 	"errors"
 	"runtime"
+	"sync"
 )
 
 // Database is a handle to a FoundationDB database. Database is a lightweight
@@ -40,17 +41,29 @@ import (
 // usually created and committed automatically by the (Database).Transact
 // method.
 type Database struct {
+	// Do not put any member variables in here!
+	// Their updates will be lost since Database is value based.
+	// Any new fields must go inside the database struct. Being
+	// pointer based, updates to those fields will not be lost.
+	*database
+}
+
+type database struct {
+
 	// String reference to the cluster file.
 	clusterFile string
 	// This variable is to track if we have to remove the database from the cached
 	// database structs. We can't use clusterFile alone, since the default clusterFile
 	// would be an empty string.
 	isCached bool
-	*database
-}
 
-type database struct {
-	ptr *C.FDBDatabase
+	// Remember that sync.Mutex cannot be copied.
+	// Therefore, mut must live in a pointed-to
+	// struct such as tenant, rather than a passed
+	// by value struct such as Tenant.
+	mut  sync.Mutex
+	gone bool
+	ptr  *C.FDBDatabase
 }
 
 // DatabaseOptions is a handle with which to set options that affect a Database
@@ -61,15 +74,26 @@ type DatabaseOptions struct {
 }
 
 // Close will close the Database and clean up all resources.
-// It must be called exactly once for each created database.
-// You have to ensure that you're not reusing this database
-// after it has been closed.
-func (d Database) Close() {
-	// Remove database object from the cached databases
+// You have to ensure that you're not using the database
+// after it has been closed. It is safe to call Close()
+// multiple times and/or from multiple goroutines; the
+// underlying database will only be closed once.
+func (d *Database) Close() {
+
+	// make Close() goroutine safe, and idempotent.
+	d.mut.Lock()
+	defer d.mut.Unlock()
+	if d.gone {
+		return
+	}
+	d.gone = true
+
+	// Remove database object from the cached databases.
+	// reading d.isCached is obviously not thread/race-safe
+	// without the lock above.
 	if d.isCached {
 		openDatabases.Delete(d.clusterFile)
 	}
-
 	if d.ptr == nil {
 		return
 	}

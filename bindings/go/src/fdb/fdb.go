@@ -330,6 +330,7 @@ func MustOpenDefault() Database {
 // the multi-version client API must be used.
 // Caller must call Close() to release resources.
 func OpenDatabase(clusterFile string) (Database, error) {
+
 	var db Database
 	var okDb bool
 	anyy, exist := openDatabases.Load(clusterFile)
@@ -401,9 +402,9 @@ func createDatabase(clusterFile string) (Database, error) {
 		return Database{}, createErr
 	}
 
-	db := &database{outdb}
+	db := &database{ptr: outdb, clusterFile: clusterFile, isCached: true}
 
-	return Database{clusterFile: clusterFile, isCached: true, database: db}, nil
+	return Database{database: db}, nil
 }
 
 // OpenWithConnectionString returns a database handle to the FoundationDB cluster identified
@@ -437,9 +438,8 @@ func OpenWithConnectionString(connectionString string) (Database, error) {
 		return Database{}, createErr
 	}
 
-	db := &database{outdb}
-
-	return Database{"", false, db}, nil
+	db := &database{ptr: outdb}
+	return Database{database: db}, nil
 }
 
 // Deprecated: Use OpenDatabase instead.
