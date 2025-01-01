@@ -156,6 +156,17 @@ type Tenant struct {
 	db Database
 }
 
+// Close releases the local handle/resources associated
+// with the tenant; it does not affect the
+// tenant's existance or the data it owns at all.
+// Client programs should arrange to call Close()
+// when they are done with the Tenant. Often
+// this can be done conveniently in a defer statement
+// right after OpenTenant.
+func (t *Tenant) Close() {
+	t.destroy()
+}
+
 type tenant struct {
 	ptr *C.FDBTenant
 }
@@ -169,7 +180,7 @@ func (d Database) OpenTenant(name KeyConvertible) (Tenant, error) {
 	}
 
 	tnt := &tenant{outt}
-	runtime.SetFinalizer(tnt, (*tenant).destroy)
+	//runtime.SetFinalizer(tnt, (*tenant).destroy)
 
 	return Tenant{tnt, d}, nil
 }
