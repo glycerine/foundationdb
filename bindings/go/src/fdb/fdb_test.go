@@ -23,6 +23,7 @@
 package fdb_test
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"testing"
@@ -390,9 +391,39 @@ func ExampleOpenWithConnectionString() {
 	// Output:
 }
 
-func TestGetClientStatus(t *testing.T) {
-	// skip this test because multi-version client is currently not available in CI
-	t.Skip()
+// Copied from errors.go so that these types aren't public
+var (
+	errTenantNotFound    = fdb.Error{2131}
+	errTenantExists      = fdb.Error{2132}
+	errTenantNameInvalid = fdb.Error{2134}
+)
+
+func TestCreateTenant(t *testing.T) {
+	fdb.MustAPIVersion(API_VERSION)
+	db := fdb.MustOpenDefault()
+
+	testTenantName := fdb.Key("test-create-tenant")
+
+	exists, err := db.TenantExists(testTenantName)
+	if err != nil {
+		t.Fatalf("Unable to check if tenant exists: %v\n", err)
+	}
+	//fmt.Printf("Tenant exists for '%v': %v\n", string(testTenantName), exists)
+
+	if !exists {
+		err := db.CreateTenant(testTenantName)
+		if err != nil {
+			t.Fatalf("Unable to create tenant: %v\n", err)
+		}
+	}
+
+	_, err = db.OpenTenant(testTenantName)
+	if err != nil {
+		t.Fatalf("Unable to open tenant: %v\n", err)
+	}
+}
+
+func TestDeleteTenantsIfExist(t *testing.T) {
 
 	fdb.MustAPIVersion(API_VERSION)
 	db := fdb.MustOpenDefault()
@@ -430,4 +461,193 @@ func ExampleDatabase_GetClientStatus() {
 	// Do work here
 
 	// Output:
+	// 1. get a clean baseline first, so no test cross talk.
+
+	testTenantName1 := fdb.Key("1-bulk-delete-test-list-1-tenant-1")
+	testTenantName2 := fdb.Key("1-bulk-delete-test-list-1-tenant-2")
+
+	names := []fdb.KeyConvertible{testTenantName1, testTenantName2}
+	deleteBoth := func(t *testing.T) {
+		err := db.DeleteTenantsIfExist(names)
+		if err != nil {
+			t.Fatalf("Unable to delete existing tenants if they exist: %v\n", err)
+		}
+	}
+	deleteBoth(t)
+
+	// 2. verify these tenants do not exists, using ListTenants().
+
+	mustNotExist := func(t *testing.T) {
+		ls, err := db.ListTenants()
+		if err != nil {
+			t.Fatalf("Unable to list tenants: %v\n", err)
+		}
+
+		if inSlice(ls, testTenantName1) {
+			t.Fatalf("tenant 1 still in slice %#v", ls)
+		}
+
+		if inSlice(ls, testTenantName2) {
+			t.Fatalf("tenant 2 still in slice, %#v", ls)
+		}
+	}
+	mustNotExist(t)
+
+	// 3. create one of them but not the other
+
+	err := db.CreateTenant(testTenantName1)
+	if err != nil {
+		t.Fatalf("Unable to create testTenantName1: %v\n", err)
+	}
+
+	// 4. use TenantExists to test it as well.
+	exists1, err := db.TenantExists(testTenantName1)
+	if err != nil {
+		t.Fatalf("Unable to check if tenant1 exists: %v\n", err)
+	}
+	if !exists1 {
+		t.Fatalf("testTenantName1 '%v' should exist now, but does not.", string(testTenantName1))
+	}
+
+	exists2, err := db.TenantExists(testTenantName2)
+	if err != nil {
+		t.Fatalf("Unable to check if tenant2 exists: %v\n", err)
+	}
+	if exists2 {
+		t.Fatalf("testTenantName2 '%v' should not exist now, but does.", string(testTenantName2))
+	}
+
+	// 5. delete them both, this verifies there was no error
+	//    that the second one did not exist
+	deleteBoth(t)
+
+	// 6. verify both are gone.
+	mustNotExist(t)
+}
+
+func TestCreateExistTenant(t *testing.T) {
+	fdb.MustAPIVersion(API_VERSION)
+	db := fdb.MustOpenDefault()
+
+	testTenantName := fdb.Key("test-exist-tenant")
+
+	// first, cleanup any prior tenant of this name
+
+	exists, err := db.TenantExists(testTenantName)
+	if err != nil {
+		t.Fatalf("Unable to check if tenant exists: %v\n", err)
+	}
+	//fmt.Printf("Tenant exists for '%v': %v\n", string(testTenantName), exists)
+
+	if exists {
+		err = db.DeleteTenant(testTenantName)
+		if err != nil {
+			t.Fatalf("Unable to delete existing tenant '%v': %v\n", string(testTenantName), err)
+		}
+	}
+
+	err = db.CreateTenant(testTenantName)
+	if err != nil {
+		t.Fatalf("Unable to create tenant: %v\n", err)
+	}
+
+	// This should fail
+	err = db.CreateTenant(testTenantName)
+	assertErrorCodeEqual(t, err, errTenantExists)
+}
+
+func TestOpenNotExistTenant(t *testing.T) {
+	fdb.MustAPIVersion(API_VERSION)
+	db := fdb.MustOpenDefault()
+
+	testTenantName := fdb.Key("test-not-exist-tenant")
+
+	// this should fail
+	_, err := db.OpenTenant(testTenantName)
+	assertErrorCodeEqual(t, err, errTenantNotFound)
+}
+
+func TestDeleteNotExistTenant(t *testing.T) {
+	fdb.MustAPIVersion(API_VERSION)
+	db := fdb.MustOpenDefault()
+
+	testTenantName := fdb.Key("test-not-exist-tenant")
+
+	// this should fail
+	err := db.DeleteTenant(testTenantName)
+	assertErrorCodeEqual(t, err, errTenantNotFound)
+}
+
+func inSlice(sl []fdb.Key, t fdb.Key) bool {
+	for _, s := range sl {
+		if bytes.Equal(s, t) {
+			return true
+		}
+	}
+	return false
+}
+
+func assertErrorCodeEqual(t *testing.T, actual error, expected fdb.Error) {
+	if actual == nil {
+		t.Fatalf("Error is nil when it should be: %v\n", expected.Code)
+	}
+
+	castErr, ok := actual.(fdb.Error)
+	if !ok {
+		t.Fatalf("Error is wrong type %v, expected %v\n", actual, expected)
+	}
+
+	if castErr.Code != expected.Code {
+		t.Fatalf("Error is wrong code, expected %v, actual %v\n", expected.Code, castErr.Code)
+	}
+}
+
+func TestListTenant_EnsureTenant(t *testing.T) {
+	fdb.MustAPIVersion(API_VERSION)
+	db := fdb.MustOpenDefault()
+
+	testTenantName1 := fdb.Key("1-test-list-1-tenant-1")
+	testTenantName2 := fdb.Key("2-test-list-2-tenant-2")
+	names := []fdb.KeyConvertible{testTenantName1, testTenantName2}
+
+	err := db.DeleteTenantsIfExist(names)
+	if err != nil {
+		t.Fatalf("Unable to delete existing tenants if they exist: %v\n", err)
+	}
+
+	ten1, err := db.EnsureTenant(testTenantName1)
+	if err != nil {
+		t.Fatalf("Unable to create tenant 1: %v\n", err)
+	}
+	defer ten1.Close()
+
+	ten2, err := db.EnsureTenant(testTenantName2)
+	if err != nil {
+		t.Fatalf("Unable to create tenant 2: %v\n", err)
+	}
+	defer ten2.Close()
+
+	ls, err := db.ListTenants()
+	if err != nil {
+		t.Fatalf("Unable to list tenants: %v\n", err)
+	}
+
+	if !inSlice(ls, testTenantName1) {
+		t.Fatalf("tenant 1 not in slice %#v", ls)
+	}
+
+	if !inSlice(ls, testTenantName2) {
+		t.Fatalf("tenant 2 not in slice, %#v", ls)
+	}
+}
+
+func TestInvalidPrefixTenant(t *testing.T) {
+	fdb.MustAPIVersion(API_VERSION)
+	db := fdb.MustOpenDefault()
+
+	testTenantName := fdb.Key("\xFFtest-invalid-prefix-tenant")
+
+	// this should fail
+	err := db.CreateTenant(testTenantName)
+	assertErrorCodeEqual(t, err, errTenantNameInvalid)
 }
