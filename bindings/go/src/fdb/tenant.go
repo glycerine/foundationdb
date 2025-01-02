@@ -29,6 +29,7 @@ import "C"
 
 import (
 	"runtime"
+	"sync"
 )
 
 const tenantMapKey = "\xff\xff/management/tenant/map/"
@@ -69,6 +70,25 @@ func (d Database) CreateTenant(name KeyConvertible) error {
 	return err
 }
 
+// EnsureTenant creates a new tenant in the cluster only if
+// it is not already present. The tenant name cannot
+// start with the \xff byte. If the tenant already exists, no
+// error is returned. The tenant is then opened and returned.
+// Users should call Close() on the Tenant when they are
+// done using it, to release the local resources.
+func (d Database) EnsureTenant(name KeyConvertible) (Tenant, error) {
+	_, err := d.Transact(func(t Transaction) (interface{}, error) {
+		return nil, t.CreateTenant(name)
+	})
+	if err == errTenantExists {
+		return Tenant{}, nil
+	}
+	if err != nil {
+		return Tenant{}, err
+	}
+	return d.OpenTenant(name)
+}
+
 // DeleteTenant deletes an existing tenant in the cluster. If the provided tenant name doesn't exist an error will be thrown.
 func (t Transaction) DeleteTenant(name KeyConvertible) error {
 	tenantName := name.FDBKey()
@@ -102,6 +122,30 @@ func (d Database) DeleteTenant(name KeyConvertible) error {
 	return err
 }
 
+// DeleteTenantsIfExist deletes tenants in the cluster.
+// If a tenant name does not already exist, or is illegal or empty, this
+// is not considered an error; a nil error is still returned
+// from DeleteTenantsIfExist().
+// Errors communicating with the database are, of course, still reported.
+func (d Database) DeleteTenantsIfExist(names []KeyConvertible) error {
+	_, err := d.Transact(func(t Transaction) (interface{}, error) {
+
+		if err := t.Options().SetSpecialKeySpaceEnableWrites(); err != nil {
+			return nil, err
+		}
+		for _, name := range names {
+			tenantName := name.FDBKey()
+			if len(tenantName) == 0 || tenantName[0] == '\xff' {
+				continue
+			}
+			key := append(Key(tenantMapKey), tenantName...)
+			t.Clear(key)
+		}
+		return nil, nil
+	})
+	return err
+}
+
 // ListTenants lists all existings tenants in the cluster.
 func (t Transaction) ListTenants() ([]Key, error) {
 	if err := t.Options().SetSpecialKeySpaceEnableWrites(); err != nil {
@@ -127,6 +171,25 @@ func (t Transaction) ListTenants() ([]Key, error) {
 	return tenants, nil
 }
 
+// TenantExists returns true if the tenantName is already
+// present as a tenant in the Database d. If an error is
+// encountered during the check, then exists will be false
+// and err will be set. So always check err
+// before handling the exists response.
+func (d Database) TenantExists(tenantName KeyConvertible) (exists bool, err error) {
+
+	key := append(Key(tenantMapKey), tenantName.FDBKey()...)
+
+	_, err = d.Transact(func(t Transaction) (interface{}, error) {
+		exists, err = t.checkTenantExist(key)
+		return false, err
+	})
+	if err != nil {
+		return false, err
+	}
+	return
+}
+
 // ListTenants lists all existings tenants in the cluster.
 func (d Database) ListTenants() ([]Key, error) {
 	tenants, err := d.Transact(func(t Transaction) (interface{}, error) {
@@ -144,7 +207,7 @@ func (t Transaction) checkTenantExist(tenantPath Key) (bool, error) {
 		return false, err
 	}
 
-	return buf != nil, nil
+	return len(buf) > 0, nil
 }
 
 // Tenant is a handle to a FoundationDB tenant. Tenant is a lightweight
@@ -158,38 +221,65 @@ type Tenant struct {
 
 // Close releases the local handle/resources associated
 // with the tenant; it does not affect the
-// tenant's existance or the data it owns at all.
+// tenant's existence or the data it owns at all.
 // Client programs should arrange to call Close()
 // when they are done with the Tenant. Often
 // this can be done conveniently in a defer statement
-// right after OpenTenant.
+// right after OpenTenant. Close is idempotent and
+// goroutine safe. It is safe to call Close()
+// multiple times or from multiple goroutines.
 func (t *Tenant) Close() {
 	t.destroy()
 }
 
 type tenant struct {
-	ptr *C.FDBTenant
+	// Remember that sync.Mutex cannot be copied.
+	// Therefore, mut must live in a pointed-to
+	// struct such as tenant, rather than a passed
+	// by value struct such as Tenant.
+	mut  sync.Mutex
+	gone bool
+	ptr  *C.FDBTenant
 }
 
 // OpenTenant returns a tenant handle identified by the given name. All transactions
 // created by this tenant will operate on the tenant’s key-space.
+// OpenTenant will return an error if the name is not
+// an existing tenant. Prefer EnsureTenant() if you are not sure.
 func (d Database) OpenTenant(name KeyConvertible) (Tenant, error) {
+
+	exists, err := d.TenantExists(name)
+	if err != nil {
+		return Tenant{}, err
+	}
+	if !exists {
+		return Tenant{}, errTenantNotFound
+	}
+
 	var outt *C.FDBTenant
 	if err := C.fdb_database_open_tenant(d.database.ptr, byteSliceToPtr(name.FDBKey()), C.int(len(name.FDBKey())), &outt); err != 0 {
 		return Tenant{}, Error{int(err)}
 	}
 
-	tnt := &tenant{outt}
-	//runtime.SetFinalizer(tnt, (*tenant).destroy)
+	tnt := &tenant{ptr: outt}
+	// Do not use finalizers, they cause crashes!
+	// Have the user call Close() instead.
 
-	return Tenant{tnt, d}, nil
+	return Tenant{tenant: tnt, db: d}, nil
 }
 
 func (t *tenant) destroy() {
+	// only call C.fdb_tenant_destroy once.
+	t.mut.Lock()
+	defer t.mut.Unlock()
+	if t.gone {
+		return
+	}
+	t.gone = true
+
 	if t.ptr == nil {
 		return
 	}
-
 	C.fdb_tenant_destroy(t.ptr)
 }
 
