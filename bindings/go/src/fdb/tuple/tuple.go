@@ -46,7 +46,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
+	"github.com/glycerine/foundationdb/bindings/go/src/fdb"
 )
 
 // A TupleElement is one of the types that may be encoded in FoundationDB

@@ -28,8 +28,8 @@ import (
 	"math/rand"
 	"sync"
 
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
-	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
+	"github.com/glycerine/foundationdb/bindings/go/src/fdb"
+	"github.com/glycerine/foundationdb/bindings/go/src/fdb/subspace"
 )
 
 var oneBytes = []byte{0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}

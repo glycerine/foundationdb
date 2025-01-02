@@ -26,8 +26,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
-	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
+	"github.com/glycerine/foundationdb/bindings/go/src/fdb"
+	"github.com/glycerine/foundationdb/bindings/go/src/fdb/subspace"
 )
 
 // DirectorySubspace represents a Directory that may also be used as a Subspace

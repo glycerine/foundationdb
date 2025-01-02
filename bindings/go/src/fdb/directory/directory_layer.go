@@ -28,9 +28,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
-	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
-	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
+	"github.com/glycerine/foundationdb/bindings/go/src/fdb"
+	"github.com/glycerine/foundationdb/bindings/go/src/fdb/subspace"
+	"github.com/glycerine/foundationdb/bindings/go/src/fdb/tuple"
 )
 
 type directoryLayer struct {

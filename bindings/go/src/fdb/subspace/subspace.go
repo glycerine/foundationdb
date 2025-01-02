@@ -37,8 +37,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
-	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
+	"github.com/glycerine/foundationdb/bindings/go/src/fdb"
+	"github.com/glycerine/foundationdb/bindings/go/src/fdb/tuple"
 )
 
 // Subspace represents a well-defined region of keyspace in a FoundationDB
