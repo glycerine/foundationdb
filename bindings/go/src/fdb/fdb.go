@@ -22,7 +22,7 @@
 
 package fdb
 
-// #define FDB_API_VERSION 740
+// #define FDB_API_VERSION 730
 // #include <foundationdb/fdb_c.h>
 // #include <stdlib.h>
 import "C"
@@ -129,7 +129,7 @@ func (opt NetworkOptions) setOpt(code int, param []byte) error {
 // the API version of your application after upgrading your client until the
 // cluster has also been upgraded.
 func APIVersion(version int) error {
-	headerVersion := 740
+	headerVersion := 730
 
 	networkMutex.Lock()
 	defer networkMutex.Unlock()
