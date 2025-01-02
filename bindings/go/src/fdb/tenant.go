@@ -225,9 +225,10 @@ type Tenant struct {
 // Client programs should arrange to call Close()
 // when they are done with the Tenant. Often
 // this can be done conveniently in a defer statement
-// right after OpenTenant. Close is idempotent and
+// right after EnsureTenant() or OpenTenant().
+// Close() is idempotent and
 // goroutine safe. It is safe to call Close()
-// multiple times or from multiple goroutines.
+// multiple times and/or from multiple goroutines.
 func (t *Tenant) Close() {
 	t.destroy()
 }
