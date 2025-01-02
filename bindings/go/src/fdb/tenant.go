@@ -271,6 +271,7 @@ func (d Database) OpenTenant(name KeyConvertible) (Tenant, error) {
 
 func (t *tenant) destroy() {
 	// only call C.fdb_tenant_destroy once.
+	// makes Close() goroutine safe, and idempotent.
 	t.mut.Lock()
 	defer t.mut.Unlock()
 	if t.gone {

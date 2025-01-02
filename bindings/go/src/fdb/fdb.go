@@ -196,6 +196,7 @@ var apiVersion int
 var networkStarted bool
 var networkMutex sync.Mutex
 
+var openDatabasesMut sync.Mutex // must be held to access openDatabases
 var openDatabases map[string]Database
 
 func init() {
@@ -270,14 +271,19 @@ func OpenDatabase(clusterFile string) (Database, error) {
 		return Database{}, err
 	}
 
+	openDatabasesMut.Lock()
 	db, ok := openDatabases[clusterFile]
+	openDatabasesMut.Unlock()
+
 	if !ok {
 		var e error
 		db, e = createDatabase(clusterFile)
 		if e != nil {
 			return Database{}, e
 		}
+		openDatabasesMut.Lock()
 		openDatabases[clusterFile] = db
+		openDatabasesMut.Unlock()
 	}
 
 	return db, nil
@@ -341,10 +347,10 @@ func createDatabase(clusterFile string) (Database, error) {
 		return Database{}, Error{int(err)}
 	}
 
-	db := &database{outdb}
+	db := &database{ptr: outdb, clusterFile: clusterFile, isCached: true}
 	runtime.SetFinalizer(db, (*database).destroy)
 
-	return Database{clusterFile, true, db}, nil
+	return Database{database: db}, nil
 }
 
 // OpenWithConnectionString returns a database handle to the FoundationDB cluster identified
@@ -369,10 +375,10 @@ func OpenWithConnectionString(connectionString string) (Database, error) {
 		return Database{}, Error{int(err)}
 	}
 
-	db := &database{outdb}
+	db := &database{ptr: outdb, clusterFile: "", isCached: false}
 	runtime.SetFinalizer(db, (*database).destroy)
 
-	return Database{"", false, db}, nil
+	return Database{database: db}, nil
 }
 
 // Deprecated: Use OpenDatabase instead.
